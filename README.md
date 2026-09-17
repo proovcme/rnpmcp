@@ -1,79 +1,214 @@
 # Renga MCP
 
-Local Model Context Protocol server for the Renga BIM desktop application. Read tools are the default surface; narrowly scoped write tools use preview-by-default and Renga undoable operations.
+[![CI](https://github.com/proovcme/rnpmcp/actions/workflows/ci.yml/badge.svg)](https://github.com/proovcme/rnpmcp/actions/workflows/ci.yml)
+[![Лицензия: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-The server attaches to an already running Renga process through the Windows Running Object Table (ROT). It does not launch Renga, open files, save projects, or close the application.
+Локальный MCP-сервер для подключения ИИ-агента к открытому проекту в **Renga BIM**.
 
-## Requirements
+Сервер находит уже запущенную Renga через Windows Running Object Table (ROT), читает модель и предоставляет ограниченный набор безопасных операций записи. Он не запускает Renga самостоятельно, не открывает и не сохраняет проекты и не закрывает приложение.
 
-- Windows x64
-- .NET 8 runtime or SDK
-- Renga for live mode
+> Проект находится на ранней стадии. Чтение модели и базовые операции записи уже работают, но полноценное управление геометрией и интерфейсом Renga ещё не реализовано.
 
-The project intentionally uses late-bound COM (`IDispatch`) and does not redistribute the Renga SDK or its binaries.
+## Возможности
 
-## Build and test
+- поиск запущенных экземпляров Renga и подключение к выбранному процессу;
+- получение сведений об открытом проекте;
+- постраничный поиск объектов по типу и имени;
+- чтение параметров и пользовательских свойств объекта;
+- просмотр поддерживаемых типов создаваемых объектов и доступных стилей;
+- создание одного объекта в транзакции Renga;
+- изменение одного типизированного параметра объекта;
+- предварительное выполнение операций записи с автоматическим откатом;
+- автономный mock-режим для разработки без установленной Renga;
+- последовательное выполнение всех COM-вызовов в одном STA-потоке.
+
+Сервер использует позднее связывание COM (`IDispatch`). Renga SDK и его бинарные файлы в репозиторий не входят и не распространяются.
+
+## Требования
+
+- Windows x64;
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) для сборки или .NET 8 Runtime для запуска готовой сборки;
+- установленная Renga — только для работы с реальной моделью;
+- MCP-клиент с поддержкой stdio, например Codex.
+
+Работа с реальной Renga проверена на **Renga Standard 8.12 / API 2.46**. Другие версии могут вести себя иначе.
+
+## Быстрый старт
+
+### 1. Клонирование и сборка
 
 ```powershell
+git clone https://github.com/proovcme/rnpmcp.git
+cd .\rnpmcp
 dotnet build .\src\RengaMcp.Server\RengaMcp.Server.csproj -c Release
-dotnet test .\tests\RengaMcp.Tests\RengaMcp.Tests.csproj -c Release
 ```
 
-## Offline mock mode
+После сборки сервер находится здесь:
 
-Mock mode exercises every MCP tool without Renga:
+```text
+src\RengaMcp.Server\bin\Release\net8.0-windows\RengaMcp.Server.dll
+```
+
+### 2. Подключение к Codex
+
+Скопируйте пример [`.codex/config.example.toml`](.codex/config.example.toml) в `.codex/config.toml` доверенного проекта и замените путь к DLL на абсолютный:
+
+```toml
+[mcp_servers.renga]
+command = "dotnet"
+args = ["C:\\Projects\\rnpmcp\\src\\RengaMcp.Server\\bin\\Release\\net8.0-windows\\RengaMcp.Server.dll"]
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+default_tools_approval_mode = "approve"
+enabled = true
+```
+
+Рекомендуется оставить `default_tools_approval_mode = "approve"`, чтобы операции записи были видны пользователю до выполнения.
+
+### 3. Работа с моделью
+
+1. Запустите Renga и откройте нужный проект.
+2. Запустите или перезапустите MCP-клиент с указанной конфигурацией.
+3. Проверьте состояние инструментом `renga_status`.
+4. Получите список процессов через `renga_list_instances`.
+5. Подключитесь командой `renga_connect`.
+6. После подключения используйте инструменты чтения и записи.
+
+Если запущена одна Renga, `renga_connect` можно вызвать без `process_id`. При нескольких экземплярах лучше передать PID из `renga_list_instances`.
+
+## Доступные инструменты
+
+| Инструмент | Назначение | Изменяет модель |
+|---|---|:---:|
+| `renga_status` | Состояние Renga, подключения и открытого проекта | Нет |
+| `renga_list_instances` | Список экземпляров Renga в ROT | Нет |
+| `renga_connect` | Подключение к уже запущенной Renga | Нет |
+| `renga_disconnect` | Освобождение COM-подключения без закрытия Renga | Нет |
+| `renga_get_project_info` | Общие сведения об открытом проекте | Нет |
+| `renga_query_objects` | Постраничный поиск объектов | Нет |
+| `renga_get_object` | Данные, параметры и свойства одного объекта | Нет |
+| `renga_creation_types` | Поддерживаемые типы создания и требования к хостам | Нет |
+| `renga_list_styles` | Стили из разрешённых коллекций Renga | Нет |
+| `renga_create_object` | Создание одного объекта | Да |
+| `renga_set_parameter` | Изменение одного параметра | Да |
+
+### Поддерживаемые типы создания
+
+Текущий каталог включает уровни, стены, балки, колонны, перекрытия, пластины, кровли, помещения, элементы, оборудование, сантехнические приборы, двери, окна и проёмы.
+
+Двери, окна и проёмы требуют локальный ID объекта-хоста. Для оборудования, сантехники и некоторых других категорий необходимо предварительно выбрать стиль через `renga_list_styles`.
+
+## Безопасная запись
+
+Оба инструмента записи по умолчанию получают `preview=true`:
+
+- операция реально выполняется в Renga;
+- результат проверяется;
+- транзакция откатывается;
+- модель остаётся без изменений.
+
+Чтобы сохранить изменение, вызывающая сторона должна явно передать `preview=false`.
+
+```json
+{
+  "typeId": "{1CFBA99C-01E7-4078-AE1A-3E2FF0673599}",
+  "hostObjectId": 12345,
+  "styleId": 7,
+  "preview": true
+}
+```
+
+После предварительного вызова проверьте возвращённые данные и только затем повторите операцию с `preview=false`.
+
+Также проверяйте поле `undoRecorded`. Некоторые сборки Renga API не передают GUID модели через позднее связывание COM, поэтому сервер может выполнить обычную транзакцию без отдельного пункта в истории отмены.
+
+## Пример сценария агента
+
+Пользователь может сформулировать задачу обычным языком, например:
+
+> Подключись к открытой Renga, найди все окна, покажи их типы и параметры высоты. Ничего не изменяй.
+
+Для контролируемого изменения:
+
+> Найди выбранную стену, подбери стиль двери, сначала создай дверь в режиме preview и покажи результат. Не сохраняй изменение без моего подтверждения.
+
+Успешный вызов API означает только то, что Renga приняла операцию. Он не подтверждает правильность размещения, отсутствие коллизий, эргономику или соответствие нормам.
+
+## Mock-режим без Renga
+
+Mock-режим позволяет проверить MCP-интеграцию и все инструменты на тестовой модели:
 
 ```powershell
 $env:RENGA_MCP_MODE = 'mock'
 dotnet run --project .\src\RengaMcp.Server\RengaMcp.Server.csproj
 ```
 
-Do not type ordinary text into that process: stdout is the MCP JSON-RPC transport.
+Стандартный вывод процесса занят транспортом MCP JSON-RPC. Не вводите в консоль сервера обычный текст; диагностические сообщения направляются в stderr.
 
-## Live mode
+Чтобы вернуться к реальной Renga в текущем PowerShell-сеансе:
 
-1. Start Renga and open a project.
-2. Start the MCP server without `RENGA_MCP_MODE=mock`.
-3. Call `renga_status`, then `renga_connect`, then the read tools.
+```powershell
+Remove-Item Env:RENGA_MCP_MODE
+```
 
-Available tools:
+## Сборка и тесты
 
-- `renga_status`
-- `renga_list_instances`
-- `renga_connect`
-- `renga_disconnect`
-- `renga_get_project_info`
-- `renga_query_objects`
-- `renga_get_object`
-- `renga_creation_types`
-- `renga_list_styles`
-- `renga_create_object`
-- `renga_set_parameter`
+```powershell
+dotnet build .\src\RengaMcp.Server\RengaMcp.Server.csproj -c Release
+dotnet test .\tests\RengaMcp.Tests\RengaMcp.Tests.csproj -c Release
+```
 
-`renga_create_object` and `renga_set_parameter` default to `preview=true`. Preview executes the Renga operation and rolls it back. A persistent change requires the caller to explicitly pass `preview=false`. Check the returned `undoRecorded` value: typed Renga interop supports model undo, but some API builds cannot marshal the model GUID through late-bound COM and fall back to a normal transaction.
+Тесты и сборка также запускаются в GitHub Actions при каждом push и pull request.
 
-## Codex configuration
+## Ограничения текущей версии
 
-Copy `.codex/config.example.toml` into a trusted project's `.codex/config.toml` and replace the DLL path with an absolute path. Keep `default_tools_approval_mode = "approve"`: write tools must remain visible to the user before execution.
+- сервер подключается только к уже запущенной Renga с открытым проектом;
+- нет команд открытия, сохранения или закрытия проекта;
+- создание выполняется с исходным размещением Renga; отдельный MCP-инструмент прямого редактирования геометрии пока отсутствует;
+- нет управления выбором, камерой и видами интерфейса;
+- нет экспорта, снимков экрана и IFC fallback;
+- операции создания пока выполняются по одному объекту;
+- локальные числовые ID подходят для текущего сеанса, но для долговременных ссылок следует использовать `UniqueId` объекта;
+- имена объектов локализованы и не являются стабильными идентификаторами;
+- числовые параметры используют базовые единицы Renga API — единицу необходимо выяснить до записи, а не угадывать по отображаемому имени;
+- отсутствие предупреждений Renga не доказывает отсутствие коллизий и соответствие требованиям проектирования.
 
-## Safety and BIM interpretation
+## Навык для агента
 
-- Renga COM calls are serialized on one STA thread.
-- Local numeric IDs are returned for diagnostics; use `UniqueId` GUIDs for durable references.
-- Object names are localized labels and must not be treated as stable identifiers.
-- Model data and absence of Renga warnings do not prove ergonomic, accessibility, fire-safety, or regulatory compliance.
-- Large result sets are paginated and individual object values are bounded.
-- Creation is generic and starts at Renga's default placement. Geometry and semantic parameters must be checked after creation; a successful API call is not a design-quality check.
-- Parameter doubles use Renga API base units. Inspect the parameter definition and existing value before writing; never infer a unit from the localized display name.
+В каталоге [`skills/operate-renga-via-api`](skills/operate-renga-via-api) находится готовый навык для Codex. Он описывает безопасную работу с Renga API, транзакции, порядок создания зависимых объектов и обязательные проверки геометрии:
 
-## Current scope
+- стены должны доходить до перекрытия или кровли;
+- кровля не заменяет потолок;
+- сантехнические приборы должны быть привязаны к реальным стенам и инженерным зонам;
+- мебель, оборудование и траектории дверей проверяются на коллизии;
+- оконные проёмы и зоны подхода к ним должны оставаться свободными.
 
-The read adapter has been smoke-tested against Renga Standard 8.12 / API 2.46. The initial write surface covers generic object creation and typed parameter assignment. Export, screenshots, selection control, direct placement editing, and IFC fallback remain out of scope.
+Навык не содержит Renga SDK, локальных путей, идентификаторов пользовательских проектов или других машинно-зависимых данных.
 
-## Agent skill
+## Архитектура
 
-The reusable `operate-renga-via-api` skill is in `skills/operate-renga-via-api`. It distills the official Renga API creation, transaction, placement, roof, geometry-export, and collision-check patterns. It contains no SDK binaries, project identifiers, or machine-specific paths.
+```text
+MCP-клиент
+    │ stdio / JSON-RPC
+    ▼
+RengaMcp.Server (.NET 8, x64)
+    │ один STA-поток + late-bound COM
+    ▼
+Windows ROT
+    │
+    ▼
+Запущенная Renga и открытый проект
+```
 
-## License
+## Участие в разработке
 
-MIT. See `LICENSE`.
+Issues и pull requests приветствуются. Перед отправкой изменений:
+
+1. не добавляйте в репозиторий Renga SDK, Interop DLL и другие закрытые бинарные файлы;
+2. не публикуйте пути пользователя, ID реальных проектов и содержимое моделей;
+3. сохраняйте безопасное поведение: запись должна выполняться через явный вызов и предварительный режим;
+4. запустите сборку и тесты в Release-конфигурации.
+
+## Лицензия
+
+MIT — см. файл [LICENSE](LICENSE).
