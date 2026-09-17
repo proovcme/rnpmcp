@@ -26,6 +26,8 @@ Export actual 3D geometry; never infer occupied size from a style name or insert
 - Long objects such as wardrobes and baths must be checked against both ends and adjacent partitions.
 - Sanitary fixtures should form a plausible wet core. Place a WC against an internal service wall or visible riser/shaft where practicable, not blindly against a window or exterior wall.
 - Show enough service-zone geometry to make drainage and maintenance assumptions visible.
+- Check each wall-hosted electrical accessory against the full door and window interval on that wall, not only the insertion point. Select the intended wall face explicitly and keep sockets clear of furniture backs, movable leaves, wet fixtures, and appliance service zones.
+- Check ceiling lights against the actual ceiling underside, room boundary, tall furniture, doors, and roof/ceiling void. A successfully hosted light can still be on the wrong face or outside the usable room.
 
 ## Collision and usability checks
 
@@ -48,6 +50,8 @@ No static collision does not prove usability. Measure continuous circulation, lo
 - Separate floor, ceiling, and roof geometry where required.
 - Door swings and window keep-out zones are usable.
 - Furniture and fixtures do not penetrate walls or each other unintentionally.
+- Electrical accessories are on the intended wall faces and do not overlap openings, furniture, fixtures, or paired accessories on the opposite face.
+- Lighting fixtures are hosted on the intended ceiling face and distributed by room use; placement alone is not a lighting calculation.
 - Primary routes remain continuous in operating conditions.
 - Plan and 3D visual inspection agree with exported geometry.
 - Undo items and schematic approximations are reported.

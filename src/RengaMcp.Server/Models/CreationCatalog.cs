@@ -15,6 +15,8 @@ public static class CreationCatalog
         new("Element", "{E1E3BD66-2E13-4FA4-A9EB-677E03067C2F}", false, "Optional level local ID; select an element style"),
         new("Equipment", "{5D2F3734-5A49-4504-90B1-0676F0F25DA7}", false, "Optional level local ID; style is required"),
         new("PlumbingFixture", "{B8C7155A-B462-4FF5-BC41-C9C17A9F48FA}", false, "Optional level local ID; style is required"),
+        new("LightingFixture", "{793D3F7C-905D-4D85-A351-B152241DD2E7}", true, "Wall, column, beam, or floor local ID; style is required"),
+        new("WiringAccessory", "{B00D5C25-92A8-4409-A3B7-7C37ED792C06}", true, "Wall, column, beam, or floor local ID; style is required"),
         new("Door", "{1CFBA99C-01E7-4078-AE1A-3E2FF0673599}", true, "Wall local ID"),
         new("Window", "{2B02B353-2CA5-4566-88BB-917EA8460174}", true, "Wall local ID"),
         new("Opening", "{FC443D5A-B76C-45E5-B91C-520EF0896109}", true, "Allowed host local ID")

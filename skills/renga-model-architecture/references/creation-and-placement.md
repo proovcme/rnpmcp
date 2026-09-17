@@ -29,6 +29,8 @@ Create right-handed, normalized, orthogonal placements. The placement structure 
 
 Renga may project dependent objects onto their hosts. For windows and doors, placement X-axis controls the outside direction relative to the wall. For holes and hosted electrical objects, the closest host face to the input origin is selected. For route objects, the origin is projected onto the route.
 
+For wall-hosted sockets, switches, and lights, do not place the origin on the wall centreline: offset it deliberately toward the intended room so that the nearest face is unambiguous. Two accessories intended for opposite sides of one wall need distinct origins and post-apply host/geometry checks. For ceiling lights, host the actual ceiling or floor object and target its underside; a room-centre XY coordinate with a guessed Z value is not enough.
+
 `ILevelObject.SetPlacement()` cannot edit every type and cannot currently move an object with dependants. Doors, windows, openings, rooms, route points, object-based railings, and rebars are among the documented restrictions. Do not treat a rejected move as a transient error; choose a supported reconstruction strategy only with authorization.
 
 ## Baselines and contours

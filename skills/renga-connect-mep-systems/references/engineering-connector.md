@@ -42,6 +42,8 @@ Pipe and duct parameter objects distinguish main and branch rules. Set deliberat
 
 Fittings must be compatible with route styles in material, connection type, and connection geometry. Treat all numeric values as Renga API base units and verify the relevant property contract before writing.
 
+Do not assume that a same-diameter fitting name proves compatibility. On Renga 9.3 / API 2.50, an over-constrained or partly incompatible fitting preference list can fail with `Invalid fitting components`, while the same connection succeeds when the fitting list is omitted and Renga selects a compatible result. Start with a reviewed route style and the smallest justified fitting set; if the preview reports this error, retry once with the fitting preferences removed, then inspect the generated route and fittings before commit.
+
 ## Electrical parameters
 
 Set the documented height, offset, enclosing-structure behaviour, and compatible electrical circuit line styles. Do not transpose pipe or duct assumptions to electrical routing.
@@ -57,6 +59,8 @@ Before the operation, clear `IApplication.LastError` when available. If nothing 
 5. insulation ID and other referenced IDs;
 6. height, offset, and enclosing-structure parameters;
 7. unsupported route endpoint combinations.
+
+After a successful connection, re-read every fixture port. A route point intentionally used as a project boundary can retain a free port; do not disguise that boundary by mixing unrelated system categories or closing a fictitious loop merely to remove a warning marker.
 
 After apply, compare object collections or stable identifiers before and after the operation. A non-null dispatch result alone is not a topology audit.
 
