@@ -62,10 +62,14 @@ public sealed class RengaTools(IRengaAdapter adapter)
     [Description("List common Renga entity type GUIDs supported by the generic creation tool and their host requirements.")]
     public static IReadOnlyList<CreationType> GetCreationTypes() => CreationCatalog.Types;
 
+    [McpServerTool(Name = "renga_system_categories", ReadOnly = true, Idempotent = true)]
+    [Description("List stable names and numeric Renga values for supported pipe, duct, and electrical system categories.")]
+    public static IReadOnlyList<SystemCategoryInfo> GetSystemCategories() => CreationCatalog.SystemCategories;
+
     [McpServerTool(Name = "renga_list_styles", ReadOnly = true, Idempotent = true)]
     [Description("List style IDs from a safe named Renga style collection for use with renga_create_object.")]
     public Task<StylePage> ListStyles(
-        [Description("Style collection key such as beam, column, door, window, plate, element, equipment, mechanical_equipment, plumbing_fixture, lighting_fixture, or wiring_accessory.")] string collection,
+        [Description("Style collection key such as beam, door, plumbing_fixture, pipe, pipe_fitting, duct, duct_fitting, electrical_circuit_line, layered_material, or system.")] string collection,
         [Description("Zero-based offset.")] int offset = 0,
         [Description("Number of styles to return, from 1 to 500.")] int limit = 100,
         CancellationToken cancellationToken = default) =>
@@ -93,4 +97,53 @@ public sealed class RengaTools(IRengaAdapter adapter)
         [Description("When true, set then roll back without persisting. Defaults to true for safety.")] bool preview = true,
         CancellationToken cancellationToken = default) =>
         adapter.SetParameterAsync(objectUniqueId, parameterId, value, preview, cancellationToken);
+
+    [McpServerTool(Name = "renga_get_ports", ReadOnly = true, Idempotent = true)]
+    [Description("Inspect every engineering port of one model object, including global origin, flow direction, allowed system categories, and current route connection. Requires Renga API 2.47 or later for connector workflows.")]
+    public Task<ObjectPortsResult> GetPorts(
+        [Description("Stable object GUID returned by renga_query_objects.")] string objectUniqueId,
+        CancellationToken cancellationToken = default) =>
+        adapter.GetPortsAsync(objectUniqueId, cancellationToken);
+
+    [McpServerTool(Name = "renga_create_pipe_connection", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Create a real Renga pipe-system connection between compatible ports through IEngineeringObjectConnector. Preview defaults to true and rolls back. Inspect ports and styles first; values are millimetres and style IDs are local to the current project session.")]
+    public Task<PipeConnectionResult> CreatePipeConnection(
+        string sourceObjectUniqueId,
+        int sourcePortIndex,
+        string targetObjectUniqueId,
+        int targetPortIndex,
+        [Description("Stable name returned by renga_system_categories; must be a pipe category accepted by both endpoint ports.")] string systemCategory,
+        [Description("Local PipeStyles IDs for magistral routing. Do not guess IDs.")] int[]? magistralPipeStyleIds = null,
+        [Description("Local PipeStyles IDs for branch routing. Do not guess IDs.")] int[]? branchPipeStyleIds = null,
+        [Description("Compatible local PipeFittingStyles IDs. Do not guess IDs.")] int[]? pipeFittingStyleIds = null,
+        int magistralInsulationId = 0,
+        int branchInsulationId = 0,
+        double? heightMagistral = null,
+        double? heightBranch = null,
+        double? offsetMagistral = null,
+        double? offsetBranch = null,
+        bool considerEnclosingStructuresMagistral = true,
+        bool considerEnclosingStructuresBranch = true,
+        bool preview = true,
+        CancellationToken cancellationToken = default) =>
+        adapter.CreatePipeConnectionAsync(
+            new PipeConnectionRequest(
+                sourceObjectUniqueId,
+                sourcePortIndex,
+                targetObjectUniqueId,
+                targetPortIndex,
+                systemCategory,
+                magistralPipeStyleIds ?? [],
+                branchPipeStyleIds ?? [],
+                pipeFittingStyleIds ?? [],
+                magistralInsulationId,
+                branchInsulationId,
+                heightMagistral,
+                heightBranch,
+                offsetMagistral,
+                offsetBranch,
+                considerEnclosingStructuresMagistral,
+                considerEnclosingStructuresBranch,
+                preview),
+            cancellationToken);
 }

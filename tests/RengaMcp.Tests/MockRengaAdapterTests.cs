@@ -101,4 +101,38 @@ public sealed class MockRengaAdapterTests
         Assert.False(result.Committed);
         Assert.Equal("new", result.NewValue);
     }
+
+    [Fact]
+    public async Task ReadsEngineeringPorts()
+    {
+        using var adapter = new MockRengaAdapter();
+        await adapter.ConnectAsync(null);
+
+        var result = await adapter.GetPortsAsync("{44444444-1111-1111-1111-111111111111}");
+
+        var port = Assert.Single(result.Ports);
+        Assert.Equal("domestic_cold_water", Assert.Single(port.AvailableSystemCategories).Name);
+        Assert.False(port.HasConnection);
+    }
+
+    [Fact]
+    public async Task PipeConnectionPreviewDoesNotCommit()
+    {
+        using var adapter = new MockRengaAdapter();
+        await adapter.ConnectAsync(null);
+
+        var result = await adapter.CreatePipeConnectionAsync(new PipeConnectionRequest(
+            "{44444444-1111-1111-1111-111111111111}",
+            0,
+            "{55555555-1111-1111-1111-111111111111}",
+            0,
+            "domestic_cold_water",
+            [], [], [], 0, 0,
+            null, null, null, null,
+            true, true,
+            Preview: true));
+
+        Assert.False(result.Committed);
+        Assert.Single(result.CreatedObjects);
+    }
 }

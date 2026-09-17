@@ -44,4 +44,12 @@ public interface IRengaAdapter : IDisposable
         string value,
         bool preview,
         CancellationToken cancellationToken = default);
+
+    Task<ObjectPortsResult> GetPortsAsync(
+        string objectUniqueId,
+        CancellationToken cancellationToken = default);
+
+    Task<PipeConnectionResult> CreatePipeConnectionAsync(
+        PipeConnectionRequest request,
+        CancellationToken cancellationToken = default);
 }

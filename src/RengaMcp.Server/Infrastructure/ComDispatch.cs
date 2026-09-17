@@ -8,14 +8,19 @@ internal static class ComDispatch
 {
     private const BindingFlags InstancePublic = BindingFlags.Instance | BindingFlags.Public;
 
-    public static object? Get(object target, string propertyName) =>
-        target.GetType().InvokeMember(
-            propertyName,
-            InstancePublic | BindingFlags.GetProperty,
-            binder: null,
-            target,
-            args: null,
-            CultureInfo.InvariantCulture);
+    public static object? Get(object target, string propertyName)
+    {
+        var field = target.GetType().GetField(propertyName, InstancePublic);
+        return field is not null
+            ? field.GetValue(target)
+            : target.GetType().InvokeMember(
+                propertyName,
+                InstancePublic | BindingFlags.GetProperty,
+                binder: null,
+                target,
+                args: null,
+                CultureInfo.InvariantCulture);
+    }
 
     public static T Get<T>(object target, string propertyName)
     {

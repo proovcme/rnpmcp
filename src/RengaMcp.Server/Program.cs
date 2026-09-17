@@ -27,10 +27,11 @@ builder.Services.AddSingleton<IRengaAdapter>(services =>
 builder.Services
     .AddMcpServer(options =>
     {
-        options.ServerInfo = new() { Name = "renga-mcp", Version = "0.1.0" };
+        options.ServerInfo = new() { Name = "renga-mcp", Version = "0.2.0" };
         options.ServerInstructions =
             "Access a running Renga BIM instance. Connect before reading or writing a project. " +
             "Write tools preview and roll back by default; explicit preview=false is required to commit. " +
+            "Inspect engineering ports and compatible styles before creating MEP connections. " +
             "Never infer regulatory compliance or design quality from successful API calls alone. " +
             "Results may be paginated or truncated.";
     })

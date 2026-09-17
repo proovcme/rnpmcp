@@ -12,6 +12,7 @@ namespace RengaMcp.Adapters;
 public sealed class DynamicComRengaAdapter : IRengaAdapter
 {
     private const string RengaClsid = "{C94A380A-02F2-427B-8FD3-7D6572E16556}";
+    private const string RouteTypeId = "{8B323BEE-3882-4744-8838-24F45DF714A9}";
     private readonly ILogger<DynamicComRengaAdapter> _logger;
     private readonly StaWorker _worker = new("Renga MCP COM STA");
     private object? _application;
@@ -157,6 +158,216 @@ public sealed class DynamicComRengaAdapter : IRengaAdapter
         _worker.InvokeAsync(
             () => SetParameterCore(objectUniqueId, parameterId, value, preview),
             cancellationToken);
+
+    public Task<ObjectPortsResult> GetPortsAsync(
+        string objectUniqueId,
+        CancellationToken cancellationToken = default) =>
+        _worker.InvokeAsync(() => GetPortsCore(objectUniqueId), cancellationToken);
+
+    public Task<PipeConnectionResult> CreatePipeConnectionAsync(
+        PipeConnectionRequest request,
+        CancellationToken cancellationToken = default) =>
+        _worker.InvokeAsync(() => CreatePipeConnectionCore(request), cancellationToken);
+
+    private ObjectPortsResult GetPortsCore(string objectUniqueId)
+    {
+        RequireConnectorApi();
+        if (!Guid.TryParse(objectUniqueId, out var uniqueId))
+        {
+            throw new ArgumentException("object_unique_id must be a GUID.", nameof(objectUniqueId));
+        }
+
+        var application = RequireApplicationWithProject();
+        var project = RequireComObject(ComDispatch.Get(application, "Project"), "Project");
+        var model = RequireComObject(ComDispatch.Get(project, "Model"), "Model");
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        object? modelObject = null;
+        try
+        {
+            modelObject = FindModelObject(objects, uniqueId);
+            return new ObjectPortsResult(ReadObjectSummary(modelObject), ReadPorts(modelObject));
+        }
+        finally
+        {
+            ComDispatch.Release(modelObject);
+            ComDispatch.Release(objects);
+            ComDispatch.Release(model);
+            ComDispatch.Release(project);
+        }
+    }
+
+    private PipeConnectionResult CreatePipeConnectionCore(PipeConnectionRequest request)
+    {
+        RequireConnectorApi();
+        ValidatePipeConnectionRequest(request);
+        var category = CreationCatalog.GetSystemCategory(request.SystemCategory);
+        if (!string.Equals(category.Discipline, "pipe", StringComparison.Ordinal))
+        {
+            throw new ArgumentException($"System category '{category.Name}' is not a pipe category.", nameof(request));
+        }
+
+        if (!Guid.TryParse(request.SourceObjectUniqueId, out var sourceUniqueId) ||
+            !Guid.TryParse(request.TargetObjectUniqueId, out var targetUniqueId))
+        {
+            throw new ArgumentException("Source and target unique IDs must be GUIDs.", nameof(request));
+        }
+
+        if (sourceUniqueId == targetUniqueId && request.SourcePortIndex == request.TargetPortIndex)
+        {
+            throw new ArgumentException("A port cannot be connected to itself.", nameof(request));
+        }
+
+        var application = RequireApplicationWithProject();
+        var project = RequireComObject(ComDispatch.Get(application, "Project"), "Project");
+        var model = RequireComObject(ComDispatch.Get(project, "Model"), "Model");
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        object? sourceObject = null;
+        object? targetObject = null;
+        object? connector = null;
+        object? parameters = null;
+        object? operation = null;
+        object? connectorResult = null;
+        var operationStarted = false;
+        var operationFinished = false;
+        var undoRecorded = false;
+
+        try
+        {
+            if (ComDispatch.Call<bool>(project, "HasActiveOperation"))
+            {
+                throw new InvalidOperationException("Renga already has an active edit operation. Finish it before calling a write tool.");
+            }
+
+            sourceObject = FindModelObject(objects, sourceUniqueId);
+            targetObject = FindModelObject(objects, targetUniqueId);
+            var source = ReadObjectSummary(sourceObject);
+            var target = ReadObjectSummary(targetObject);
+            var sourceIsRoute = string.Equals(source.TypeId, RouteTypeId, StringComparison.OrdinalIgnoreCase);
+            var targetIsRoute = string.Equals(target.TypeId, RouteTypeId, StringComparison.OrdinalIgnoreCase);
+            if (sourceIsRoute && targetIsRoute)
+            {
+                throw new NotSupportedException("Renga does not support route-to-route connection creation.");
+            }
+
+            var sourcePortBefore = ValidateEndpointPort(sourceObject, sourceIsRoute, request.SourcePortIndex, category);
+            var targetPortBefore = ValidateEndpointPort(targetObject, targetIsRoute, request.TargetPortIndex, category);
+            if (sourcePortBefore?.HasConnection == true || targetPortBefore?.HasConnection == true)
+            {
+                throw new InvalidOperationException("At least one selected endpoint port is already connected to a route.");
+            }
+
+            ValidateStyleIds(project, "PipeStyles", request.MagistralPipeStyleIds);
+            ValidateStyleIds(project, "PipeStyles", request.BranchPipeStyleIds);
+            ValidateStyleIds(project, "PipeFittingStyles", request.PipeFittingStyleIds);
+            if (request.MagistralInsulationId != 0)
+            {
+                ValidateStyleIds(project, "LayeredMaterials", [request.MagistralInsulationId]);
+            }
+            if (request.BranchInsulationId != 0)
+            {
+                ValidateStyleIds(project, "LayeredMaterials", [request.BranchInsulationId]);
+            }
+
+            var before = SnapshotObjects(model);
+            connector = RequireComObject(ComDispatch.Get(project, "EngineeringObjectConnector"), "engineering object connector");
+            parameters = RequireComObject(
+                ComDispatch.Call(connector, "CreatePipeSystemConnectionParameters"),
+                "pipe system connection parameters");
+            ConfigurePipeParameters(parameters, request);
+
+            operation = CreateEditOperation(project, model, out undoRecorded);
+            ComDispatch.Call(operation, "Start");
+            operationStarted = true;
+            connectorResult = ComDispatch.Call(
+                connector,
+                "CreatePipeSystemConnection",
+                parameters,
+                source.LocalId,
+                request.SourcePortIndex,
+                target.LocalId,
+                request.TargetPortIndex,
+                category.Value);
+
+            var after = SnapshotObjects(model);
+            var created = after.Values.Where(item => !before.ContainsKey(item.UniqueId)).ToArray();
+            var lastError = created.Length == 0 ? ReadLastError(application) : null;
+            if (created.Length == 0)
+            {
+                throw new InvalidOperationException(
+                    string.IsNullOrWhiteSpace(lastError)
+                        ? "Renga created no route, pipe, or fitting objects. Check ports, category, styles, and routing parameters."
+                        : $"Renga created no connection: {lastError}");
+            }
+
+            var sourcePortAfter = sourceIsRoute ? null : ReadPort(sourceObject, request.SourcePortIndex);
+            var targetPortAfter = targetIsRoute ? null : ReadPort(targetObject, request.TargetPortIndex);
+            if (sourcePortAfter?.HasConnection == false || targetPortAfter?.HasConnection == false)
+            {
+                throw new InvalidOperationException("Renga generated objects, but at least one endpoint port is not connected. The operation was rolled back.");
+            }
+            if (request.Preview)
+            {
+                ComDispatch.Call(operation, "Rollback");
+                operationFinished = true;
+                return new PipeConnectionResult(
+                    false,
+                    false,
+                    "Preview succeeded; generated objects were inspected and rolled back.",
+                    source,
+                    request.SourcePortIndex,
+                    target,
+                    request.TargetPortIndex,
+                    category,
+                    created,
+                    sourcePortAfter,
+                    targetPortAfter,
+                    lastError);
+            }
+
+            ComDispatch.Call(operation, "Apply");
+            operationFinished = true;
+
+            var committed = SnapshotObjects(model);
+            var committedCreated = committed.Values.Where(item => !before.ContainsKey(item.UniqueId)).ToArray();
+            var verifiedCreated = committedCreated.Length == 0 ? created : committedCreated;
+
+            return new PipeConnectionResult(
+                true,
+                undoRecorded,
+                undoRecorded
+                    ? "Pipe connection created and verified in an undoable Renga operation."
+                    : "Pipe connection created and verified; this API build did not expose an undoable model operation.",
+                source,
+                request.SourcePortIndex,
+                target,
+                request.TargetPortIndex,
+                category,
+                verifiedCreated,
+                ReadPortByUniqueId(model, sourceUniqueId, request.SourcePortIndex, sourceIsRoute),
+                ReadPortByUniqueId(model, targetUniqueId, request.TargetPortIndex, targetIsRoute),
+                lastError);
+        }
+        catch
+        {
+            if (operationStarted && !operationFinished && operation is not null)
+            {
+                TryRollback(operation);
+            }
+            throw;
+        }
+        finally
+        {
+            ComDispatch.Release(connectorResult);
+            ComDispatch.Release(operation);
+            ComDispatch.Release(parameters);
+            ComDispatch.Release(connector);
+            ComDispatch.Release(targetObject);
+            ComDispatch.Release(sourceObject);
+            ComDispatch.Release(objects);
+            ComDispatch.Release(model);
+            ComDispatch.Release(project);
+        }
+    }
 
     private StylePage ListStylesCore(string collection, int offset, int limit)
     {
@@ -735,6 +946,292 @@ public sealed class DynamicComRengaAdapter : IRengaAdapter
                 break;
             default:
                 throw new NotSupportedException($"Renga parameter ValueType {valueType} is not supported for writing.");
+        }
+    }
+
+    private void RequireConnectorApi()
+    {
+        var versionText = _connectedInstance?.ApiVersion
+            ?? throw new InvalidOperationException("Not connected to Renga. Call renga_connect first.");
+        if (!Version.TryParse(versionText, out var version) || version < new Version(2, 47))
+        {
+            throw new NotSupportedException(
+                $"EngineeringObjectConnector requires Renga API 2.47 or later; connected API is {versionText}.");
+        }
+    }
+
+    private static void ValidatePipeConnectionRequest(PipeConnectionRequest request)
+    {
+        if (request.SourcePortIndex < -1 || request.TargetPortIndex < -1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Port indexes must be zero-based, or -1 for a route endpoint.");
+        }
+        if (request.MagistralInsulationId < 0 || request.BranchInsulationId < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Insulation IDs cannot be negative.");
+        }
+        if (request.MagistralPipeStyleIds.Concat(request.BranchPipeStyleIds).Concat(request.PipeFittingStyleIds).Any(id => id < 1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Pipe and fitting style IDs must be positive.");
+        }
+        if (new[] { request.HeightMagistral, request.HeightBranch, request.OffsetMagistral, request.OffsetBranch }
+            .Where(value => value.HasValue)
+            .Any(value => value!.Value < 0 || double.IsNaN(value.Value) || double.IsInfinity(value.Value)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Heights and offsets must be finite non-negative millimetre values.");
+        }
+    }
+
+    private static void ConfigurePipeParameters(object parameters, PipeConnectionRequest request)
+    {
+        ComDispatch.Set(parameters, "ConsiderEnclosingStructuresMagistral", request.ConsiderEnclosingStructuresMagistral);
+        ComDispatch.Set(parameters, "ConsiderEnclosingStructuresBranch", request.ConsiderEnclosingStructuresBranch);
+        if (request.HeightMagistral is double heightMagistral) ComDispatch.Set(parameters, "HeightMagistral", heightMagistral);
+        if (request.HeightBranch is double heightBranch) ComDispatch.Set(parameters, "HeightBranch", heightBranch);
+        if (request.OffsetMagistral is double offsetMagistral) ComDispatch.Set(parameters, "OffsetMagistral", offsetMagistral);
+        if (request.OffsetBranch is double offsetBranch) ComDispatch.Set(parameters, "OffsetBranch", offsetBranch);
+
+        foreach (var id in request.MagistralPipeStyleIds.Distinct())
+        {
+            ComDispatch.Call(parameters, "AddPipeStyleMagistral", id, request.MagistralInsulationId);
+        }
+        foreach (var id in request.BranchPipeStyleIds.Distinct())
+        {
+            ComDispatch.Call(parameters, "AddPipeStyleBranch", id, request.BranchInsulationId);
+        }
+        foreach (var id in request.PipeFittingStyleIds.Distinct())
+        {
+            ComDispatch.Call(parameters, "AddPipeFittingStyle", id);
+        }
+    }
+
+    private static void ValidateStyleIds(object project, string collectionName, IEnumerable<int> ids)
+    {
+        var requested = ids.Distinct().ToArray();
+        if (requested.Length == 0) return;
+
+        var collection = RequireComObject(ComDispatch.Get(project, collectionName), collectionName);
+        try
+        {
+            foreach (var id in requested)
+            {
+                object? entity = null;
+                try
+                {
+                    entity = ComDispatch.Call(collection, "GetById", id);
+                    if (entity is null)
+                    {
+                        throw new KeyNotFoundException($"{collectionName} does not contain local ID {id}.");
+                    }
+                }
+                finally
+                {
+                    ComDispatch.Release(entity);
+                }
+            }
+        }
+        finally
+        {
+            ComDispatch.Release(collection);
+        }
+    }
+
+    private static PortInfo? ValidateEndpointPort(
+        object modelObject,
+        bool isRoute,
+        int portIndex,
+        SystemCategoryInfo category)
+    {
+        if (isRoute)
+        {
+            if (portIndex != -1)
+            {
+                throw new ArgumentException("Use port index -1 when an endpoint is an existing route.");
+            }
+            return null;
+        }
+
+        if (portIndex < 0)
+        {
+            throw new ArgumentException("A non-route endpoint requires a zero-based port index.");
+        }
+        var port = ReadPort(modelObject, portIndex);
+        if (!port.AvailableSystemCategories.Any(item => item.Value == category.Value))
+        {
+            throw new InvalidOperationException(
+                $"Port {portIndex} does not support system category '{category.Name}'. Available: " +
+                string.Join(", ", port.AvailableSystemCategories.Select(item => item.Name)));
+        }
+        return port;
+    }
+
+    private static List<PortInfo> ReadPorts(object modelObject)
+    {
+        object? ports = null;
+        try
+        {
+            ports = ComDispatch.Call(modelObject, "GetInterfaceByName", "IEntityWithPorts");
+            if (ports is null)
+            {
+                throw new InvalidOperationException("The selected Renga object does not expose IEntityWithPorts.");
+            }
+            var count = ComDispatch.Get<int>(ports, "Count");
+            var result = new List<PortInfo>(count);
+            for (var index = 0; index < count; index++)
+            {
+                result.Add(ReadPortFromCollection(ports, index));
+            }
+            return result;
+        }
+        catch (TargetInvocationException exception) when (exception.InnerException is COMException)
+        {
+            throw new InvalidOperationException("The selected Renga object does not expose readable engineering ports.", exception.InnerException);
+        }
+        finally
+        {
+            ComDispatch.Release(ports);
+        }
+    }
+
+    private static PortInfo ReadPort(object modelObject, int portIndex)
+    {
+        object? ports = null;
+        try
+        {
+            ports = RequireComObject(
+                ComDispatch.Call(modelObject, "GetInterfaceByName", "IEntityWithPorts"),
+                "IEntityWithPorts interface");
+            var count = ComDispatch.Get<int>(ports, "Count");
+            if (portIndex < 0 || portIndex >= count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(portIndex), $"Port index {portIndex} is outside 0..{count - 1}.");
+            }
+            return ReadPortFromCollection(ports, portIndex);
+        }
+        finally
+        {
+            ComDispatch.Release(ports);
+        }
+    }
+
+    private static PortInfo ReadPortFromCollection(object ports, int portIndex)
+    {
+        var port = RequireComObject(ComDispatch.Call(ports, "GetByIndex", portIndex), "port");
+        try
+        {
+            var categories = ReadIntArray(ComDispatch.Get(port, "AvailableSystemCategories"))
+                .Select(CreationCatalog.GetSystemCategory)
+                .ToArray();
+            var connected = ComDispatch.Call<bool>(port, "HasConnectionWithRoute");
+            var flow = ComDispatch.Get<int>(port, "FlowDirection");
+            var role = ComDispatch.Get<int>(port, "PortRole");
+            return new PortInfo(
+                portIndex,
+                ComDispatch.GetOrDefault(port, "Name", string.Empty),
+                flow,
+                flow switch { 0 => "inlet", 1 => "outlet", 2 => "inlet_and_outlet", _ => "undefined" },
+                role,
+                role == 0 ? "end" : "transit",
+                categories,
+                connected,
+                connected ? ComDispatch.Call<int>(port, "ConnectedRouteId") : null,
+                TryReadGlobalOrigin(port));
+        }
+        finally
+        {
+            ComDispatch.Release(port);
+        }
+    }
+
+    private static int[] ReadIntArray(object? value)
+    {
+        if (value is int[] integers) return integers;
+        if (value is Array array) return array.Cast<object>().Select(Convert.ToInt32).ToArray();
+        return [];
+    }
+
+    private static Point3DValue? TryReadGlobalOrigin(object port)
+    {
+        object? placement = null;
+        object? origin = null;
+        try
+        {
+            placement = ComDispatch.Get(port, "GlobalPlacement");
+            if (placement is null) return null;
+            origin = ComDispatch.Get(placement, "Origin");
+            if (origin is null) return null;
+            return new Point3DValue(
+                ComDispatch.Get<double>(origin, "X"),
+                ComDispatch.Get<double>(origin, "Y"),
+                ComDispatch.Get<double>(origin, "Z"));
+        }
+        catch (Exception exception) when (exception is COMException or TargetInvocationException or ArgumentException)
+        {
+            return null;
+        }
+        finally
+        {
+            ComDispatch.Release(origin);
+            ComDispatch.Release(placement);
+        }
+    }
+
+    private static Dictionary<string, RengaObjectSummary> SnapshotObjects(object model)
+    {
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        try
+        {
+            var result = new Dictionary<string, RengaObjectSummary>(StringComparer.OrdinalIgnoreCase);
+            var count = ComDispatch.Get<int>(objects, "Count");
+            for (var index = 0; index < count; index++)
+            {
+                var modelObject = RequireComObject(ComDispatch.Call(objects, "GetByIndex", index), "model object");
+                try
+                {
+                    var summary = ReadObjectSummary(modelObject);
+                    result[summary.UniqueId] = summary;
+                }
+                finally
+                {
+                    ComDispatch.Release(modelObject);
+                }
+            }
+            return result;
+        }
+        finally
+        {
+            ComDispatch.Release(objects);
+        }
+    }
+
+    private static PortInfo? ReadPortByUniqueId(object model, Guid uniqueId, int portIndex, bool isRoute)
+    {
+        if (isRoute) return null;
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        object? modelObject = null;
+        try
+        {
+            modelObject = FindModelObject(objects, uniqueId);
+            return ReadPort(modelObject, portIndex);
+        }
+        finally
+        {
+            ComDispatch.Release(modelObject);
+            ComDispatch.Release(objects);
+        }
+    }
+
+    private static string? ReadLastError(object application)
+    {
+        try
+        {
+            return ComDispatch.GetOrDefault(application, "HasLastError", false)
+                ? ComDispatch.GetOrDefault(application, "LastError", string.Empty)
+                : null;
+        }
+        catch (Exception exception) when (exception is COMException or TargetInvocationException)
+        {
+            return null;
         }
     }
 

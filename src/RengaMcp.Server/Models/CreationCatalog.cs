@@ -33,6 +33,51 @@ public static class CreationCatalog
             ["mechanical_equipment"] = "MechanicalEquipmentStyles",
             ["plumbing_fixture"] = "PlumbingFixtureStyles",
             ["lighting_fixture"] = "LightingFixtureStyles",
-            ["wiring_accessory"] = "WiringAccessoryStyles"
+            ["wiring_accessory"] = "WiringAccessoryStyles",
+            ["pipe"] = "PipeStyles",
+            ["pipe_fitting"] = "PipeFittingStyles",
+            ["duct"] = "DuctStyles",
+            ["duct_fitting"] = "DuctFittingStyles",
+            ["electrical_circuit_line"] = "ElectricalCircuitLineStyles",
+            ["layered_material"] = "LayeredMaterials",
+            ["system"] = "SystemStyles"
         };
+
+    public static IReadOnlyList<SystemCategoryInfo> SystemCategories { get; } =
+    [
+        new("domestic_cold_water", 2, "pipe"),
+        new("domestic_hot_water", 3, "pipe"),
+        new("domestic_sewerage", 4, "pipe"),
+        new("domestic_gas_supply", 5, "pipe"),
+        new("water_fire_extinguishing", 6, "pipe"),
+        new("water_heating", 7, "pipe"),
+        new("gas_fire_extinguishing", 8, "pipe"),
+        new("storm_drain", 9, "pipe"),
+        new("industrial_cold_water", 10, "pipe"),
+        new("industrial_hot_water", 11, "pipe"),
+        new("industrial_sewerage", 12, "pipe"),
+        new("other_pipe_system", 13, "pipe"),
+        new("ventilation", 14, "duct"),
+        new("exhaust", 15, "duct"),
+        new("pressurization", 16, "duct"),
+        new("smoke_exhaust", 17, "duct"),
+        new("vacuum", 18, "duct"),
+        new("other_duct_system", 19, "duct"),
+        new("lighting_circuit", 20, "electrical"),
+        new("power_circuit", 21, "electrical"),
+        new("other_electrical_system", 22, "electrical")
+    ];
+
+    public static SystemCategoryInfo GetSystemCategory(string name)
+    {
+        var category = SystemCategories.FirstOrDefault(item =>
+            string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase));
+        return category ?? throw new ArgumentException(
+            $"Unknown system category '{name}'. Use renga_system_categories for allowed values.",
+            nameof(name));
+    }
+
+    public static SystemCategoryInfo GetSystemCategory(int value) =>
+        SystemCategories.FirstOrDefault(item => item.Value == value)
+        ?? new SystemCategoryInfo($"unknown_{value}", value, "unknown");
 }

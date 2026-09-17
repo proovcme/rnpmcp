@@ -11,7 +11,9 @@ public sealed class MockRengaAdapter : IRengaAdapter
     [
         new(1, "{11111111-1111-1111-1111-111111111111}", "{C3CE17FF-6F28-411F-B18D-74FE957B2BA8}", "Этаж 1", false),
         new(2, "{22222222-2222-2222-2222-222222222222}", "{AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA}", "Наружная стена", false),
-        new(3, "{33333333-3333-3333-3333-333333333333}", "{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}", "Серверная", false)
+        new(3, "{33333333-3333-3333-3333-333333333333}", "{BBBBBBBB-BBBB-BBBB-BBBB-BBBBBBBBBBBB}", "Серверная", false),
+        new(4, "{44444444-1111-1111-1111-111111111111}", "{B8C7155A-B462-4FF5-BC41-C9C17A9F48FA}", "Раковина", false),
+        new(5, "{55555555-1111-1111-1111-111111111111}", "{CE93E320-7167-4CD1-92A8-5E42D546066B}", "Точка трассы", false)
     ];
 
     private bool _connected;
@@ -160,6 +162,54 @@ public sealed class MockRengaAdapter : IRengaAdapter
             4,
             "old",
             value));
+    }
+
+    public Task<ObjectPortsResult> GetPortsAsync(
+        string objectUniqueId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireConnection();
+        var modelObject = Objects.FirstOrDefault(item =>
+            string.Equals(item.UniqueId, objectUniqueId, StringComparison.OrdinalIgnoreCase))
+            ?? throw new KeyNotFoundException($"Mock object {objectUniqueId} was not found.");
+        var category = CreationCatalog.GetSystemCategory("domestic_cold_water");
+        return Task.FromResult(new ObjectPortsResult(
+            modelObject,
+            [new PortInfo(0, "CW", 2, "inlet_and_outlet", 0, "end", [category], false, null, new Point3DValue(100, 200, 300))]));
+    }
+
+    public Task<PipeConnectionResult> CreatePipeConnectionAsync(
+        PipeConnectionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        RequireConnection();
+        var source = Objects.First(item => string.Equals(item.UniqueId, request.SourceObjectUniqueId, StringComparison.OrdinalIgnoreCase));
+        var target = Objects.First(item => string.Equals(item.UniqueId, request.TargetObjectUniqueId, StringComparison.OrdinalIgnoreCase));
+        var category = CreationCatalog.GetSystemCategory(request.SystemCategory);
+        if (category.Discipline != "pipe")
+        {
+            throw new ArgumentException("A pipe connection requires a pipe system category.", nameof(request));
+        }
+
+        var created = new RengaObjectSummary(
+            100,
+            "{99999999-1111-1111-1111-111111111111}",
+            "{838CC9F6-E3D8-4132-AF6F-C58DF0F8D037}",
+            "Mock pipe",
+            false);
+        return Task.FromResult(new PipeConnectionResult(
+            !request.Preview,
+            !request.Preview,
+            request.Preview ? "Preview succeeded; generated objects were rolled back." : "Pipe connection created.",
+            source,
+            request.SourcePortIndex,
+            target,
+            request.TargetPortIndex,
+            category,
+            [created],
+            null,
+            null,
+            null));
     }
 
     private void RequireConnection()

@@ -15,6 +15,8 @@ Use this reference for API mechanics. Complete the spatial and engineering check
 6. Start an `IProject.StartOperation()`, call the matching `Create*SystemConnection`, validate its result, then `Apply()` or `RollBack()`.
 7. Re-query route and fitting objects after apply; never infer creation from lack of an exception.
 
+In this repository's MCP server, use `renga_get_ports`, `renga_system_categories`, `renga_list_styles`, and `renga_create_pipe_connection` in that order. The pipe connection tool defaults to `preview=true`, compares the model snapshots before and after routing, and rolls the preview back. Commit only with `preview=false` after reviewing the returned generated objects.
+
 Connection creation is synchronous. Complex routing can freeze or blacken the Renga UI until the call completes. Keep the requested scope bounded and warn before expensive batches.
 
 ## Ports and endpoints
