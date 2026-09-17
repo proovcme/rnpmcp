@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Win32;
@@ -133,6 +135,250 @@ public sealed class DynamicComRengaAdapter : IRengaAdapter
         _worker.InvokeAsync(
             () => GetObjectCore(uniqueId, includeParameters, includeProperties, maxValues),
             cancellationToken);
+
+    public Task<StylePage> ListStylesAsync(
+        string collection,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default) =>
+        _worker.InvokeAsync(() => ListStylesCore(collection, offset, limit), cancellationToken);
+
+    public Task<CreateObjectResult> CreateObjectAsync(
+        CreateObjectRequest request,
+        CancellationToken cancellationToken = default) =>
+        _worker.InvokeAsync(() => CreateObjectCore(request), cancellationToken);
+
+    public Task<ParameterUpdateResult> SetParameterAsync(
+        string objectUniqueId,
+        string parameterId,
+        string value,
+        bool preview,
+        CancellationToken cancellationToken = default) =>
+        _worker.InvokeAsync(
+            () => SetParameterCore(objectUniqueId, parameterId, value, preview),
+            cancellationToken);
+
+    private StylePage ListStylesCore(string collection, int offset, int limit)
+    {
+        ValidatePage(offset, limit);
+        if (!CreationCatalog.StyleCollections.TryGetValue(collection, out var propertyName))
+        {
+            throw new ArgumentException(
+                $"Unknown style collection '{collection}'. Allowed values: {string.Join(", ", CreationCatalog.StyleCollections.Keys)}.",
+                nameof(collection));
+        }
+
+        var application = RequireApplicationWithProject();
+        var project = RequireComObject(ComDispatch.Get(application, "Project"), "Project");
+        var styles = RequireComObject(ComDispatch.Get(project, propertyName), propertyName);
+        try
+        {
+            var count = ComDispatch.Get<int>(styles, "Count");
+            var items = new List<StyleSummary>();
+            for (var index = offset; index < Math.Min(count, offset + limit); index++)
+            {
+                var style = RequireComObject(ComDispatch.Call(styles, "GetByIndex", index), "style");
+                try
+                {
+                    items.Add(new StyleSummary(
+                        ComDispatch.Get<int>(style, "Id"),
+                        NormalizeGuid(ComDispatch.GetOrDefault(style, "UniqueIdS", string.Empty)),
+                        ComDispatch.GetOrDefault(style, "Name", string.Empty)));
+                }
+                finally
+                {
+                    ComDispatch.Release(style);
+                }
+            }
+
+            return new StylePage(collection, count, offset, limit, offset + limit < count, items);
+        }
+        finally
+        {
+            ComDispatch.Release(styles);
+            ComDispatch.Release(project);
+        }
+    }
+
+    private CreateObjectResult CreateObjectCore(CreateObjectRequest request)
+    {
+        if (!Guid.TryParse(request.TypeId, out var typeId))
+        {
+            throw new ArgumentException("type_id must be a GUID.", nameof(request));
+        }
+
+        if (request.HostObjectId is < 1 || request.StyleId is < 0 || request.CategoryId is < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Host IDs must be positive; style and category IDs cannot be negative.");
+        }
+
+        var application = RequireApplicationWithProject();
+        var project = RequireComObject(ComDispatch.Get(application, "Project"), "Project");
+        var model = RequireComObject(ComDispatch.Get(project, "Model"), "Model");
+        object? arguments = null;
+        object? operation = null;
+        object? created = null;
+        var operationStarted = false;
+        var operationFinished = false;
+        var undoRecorded = false;
+
+        try
+        {
+            if (ComDispatch.Call<bool>(project, "HasActiveOperation"))
+            {
+                throw new InvalidOperationException("Renga already has an active edit operation. Finish it before calling a write tool.");
+            }
+
+            ValidateHostObject(model, request.HostObjectId);
+            arguments = RequireComObject(ComDispatch.Call(model, "CreateNewEntityArgs"), "new entity arguments");
+            ComDispatch.Set(arguments, "TypeIdS", typeId.ToString("B"));
+            if (request.HostObjectId is int hostId)
+            {
+                ComDispatch.Set(arguments, "HostObjectId", hostId);
+            }
+
+            if (request.StyleId is int styleId)
+            {
+                ComDispatch.Set(arguments, "StyleId", styleId);
+            }
+
+            if (request.CategoryId is int categoryId)
+            {
+                ComDispatch.Set(arguments, "CategoryId", categoryId);
+            }
+
+            operation = CreateEditOperation(project, model, out undoRecorded);
+            ComDispatch.Call(operation, "Start");
+            operationStarted = true;
+
+            created = ComDispatch.Call(model, "CreateObject", arguments);
+            if (created is null)
+            {
+                var lastError = ComDispatch.GetOrDefault(application, "LastError", "Unknown Renga creation error.");
+                throw new InvalidOperationException($"Renga did not create the object: {lastError}");
+            }
+
+            var summary = ReadObjectSummary(created);
+            if (request.Preview)
+            {
+                ComDispatch.Call(operation, "Rollback");
+                operationFinished = true;
+                return new CreateObjectResult(false, false, "Preview succeeded; the operation was rolled back.", summary);
+            }
+
+            ComDispatch.Call(operation, "Apply");
+            operationFinished = true;
+            return new CreateObjectResult(
+                true,
+                undoRecorded,
+                undoRecorded
+                    ? "Object created in an undoable Renga operation."
+                    : "Object created in a Renga operation; this API build did not expose the model GUID through late-bound COM, so no undo item was recorded.",
+                summary);
+        }
+        catch
+        {
+            if (operationStarted && !operationFinished && operation is not null)
+            {
+                TryRollback(operation);
+            }
+
+            throw;
+        }
+        finally
+        {
+            ComDispatch.Release(created);
+            ComDispatch.Release(operation);
+            ComDispatch.Release(arguments);
+            ComDispatch.Release(model);
+            ComDispatch.Release(project);
+        }
+    }
+
+    private ParameterUpdateResult SetParameterCore(
+        string objectUniqueId,
+        string parameterId,
+        string value,
+        bool preview)
+    {
+        if (!Guid.TryParse(objectUniqueId, out var objectId) || !Guid.TryParse(parameterId, out var parsedParameterId))
+        {
+            throw new ArgumentException("object_unique_id and parameter_id must be GUIDs.");
+        }
+
+        var application = RequireApplicationWithProject();
+        var project = RequireComObject(ComDispatch.Get(application, "Project"), "Project");
+        var model = RequireComObject(ComDispatch.Get(project, "Model"), "Model");
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        object? modelObject = null;
+        object? parameters = null;
+        object? parameter = null;
+        object? operation = null;
+        var operationStarted = false;
+        var operationFinished = false;
+        var undoRecorded = false;
+
+        try
+        {
+            modelObject = FindModelObject(objects, objectId);
+            parameters = RequireComObject(ComDispatch.Call(modelObject, "GetParameters"), "parameter container");
+            parameter = RequireComObject(
+                ComDispatch.Call(parameters, "GetS", parsedParameterId.ToString("B")),
+                "parameter");
+
+            if (ComDispatch.Get<bool>(parameter, "IsReadOnly"))
+            {
+                throw new InvalidOperationException($"Parameter {parsedParameterId:B} is read-only.");
+            }
+
+            var valueType = ComDispatch.Get<int>(parameter, "ValueType");
+            var previousValue = ComDispatch.Get<bool>(parameter, "HasValue")
+                ? ReadParameterValue(parameter, valueType)
+                : null;
+            var parsedValue = ParseParameterValue(value, valueType);
+
+            if (ComDispatch.Call<bool>(project, "HasActiveOperation"))
+            {
+                throw new InvalidOperationException("Renga already has an active edit operation. Finish it before calling a write tool.");
+            }
+
+            operation = CreateEditOperation(project, model, out undoRecorded);
+            ComDispatch.Call(operation, "Start");
+            operationStarted = true;
+            WriteParameterValue(parameter, valueType, parsedValue);
+            var newValue = ReadParameterValue(parameter, valueType);
+
+            if (preview)
+            {
+                ComDispatch.Call(operation, "Rollback");
+                operationFinished = true;
+                return new ParameterUpdateResult(false, false, objectId.ToString("B"), parsedParameterId.ToString("B"), valueType, previousValue, newValue);
+            }
+
+            ComDispatch.Call(operation, "Apply");
+            operationFinished = true;
+            return new ParameterUpdateResult(true, undoRecorded, objectId.ToString("B"), parsedParameterId.ToString("B"), valueType, previousValue, newValue);
+        }
+        catch
+        {
+            if (operationStarted && !operationFinished && operation is not null)
+            {
+                TryRollback(operation);
+            }
+
+            throw;
+        }
+        finally
+        {
+            ComDispatch.Release(operation);
+            ComDispatch.Release(parameter);
+            ComDispatch.Release(parameters);
+            ComDispatch.Release(modelObject);
+            ComDispatch.Release(objects);
+            ComDispatch.Release(model);
+            ComDispatch.Release(project);
+        }
+    }
 
     private ObjectPage QueryObjectsCore(ObjectQuery query)
     {
@@ -414,6 +660,126 @@ public sealed class DynamicComRengaAdapter : IRengaAdapter
         }
 
         return null;
+    }
+
+    private static object FindModelObject(object objects, Guid uniqueId)
+    {
+        object? modelObject = null;
+        try
+        {
+            modelObject = ComDispatch.Call(objects, "GetByUniqueIdS", uniqueId.ToString("B"));
+        }
+        catch (COMException)
+        {
+            // Older API builds may expose lookup only through iteration.
+        }
+
+        modelObject ??= FindObjectByUniqueId(objects, uniqueId);
+        return modelObject
+            ?? throw new KeyNotFoundException($"Renga object {uniqueId:B} was not found in the current project snapshot.");
+    }
+
+    private static void ValidateHostObject(object model, int? hostObjectId)
+    {
+        if (hostObjectId is not int hostId)
+        {
+            return;
+        }
+
+        var objects = RequireComObject(ComDispatch.Call(model, "GetObjects"), "model objects");
+        object? host = null;
+        try
+        {
+            host = ComDispatch.Call(objects, "GetById", hostId);
+            if (host is null)
+            {
+                throw new KeyNotFoundException($"Host object with local ID {hostId} was not found.");
+            }
+        }
+        finally
+        {
+            ComDispatch.Release(host);
+            ComDispatch.Release(objects);
+        }
+    }
+
+    private static object ParseParameterValue(string value, int valueType) => valueType switch
+    {
+        1 when bool.TryParse(value, out var booleanValue) => booleanValue,
+        1 when value == "1" => true,
+        1 when value == "0" => false,
+        1 => throw new FormatException("Boolean parameter values must be true, false, 1, or 0."),
+        2 when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integerValue) => integerValue,
+        2 => throw new FormatException("Integer parameter value is invalid. Use invariant digits without a unit."),
+        3 when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var doubleValue) => doubleValue,
+        3 => throw new FormatException("Double parameter value is invalid. Use a dot as decimal separator and Renga API base units."),
+        4 => value,
+        _ => throw new NotSupportedException($"Renga parameter ValueType {valueType} is not supported for writing.")
+    };
+
+    private static void WriteParameterValue(object parameter, int valueType, object value)
+    {
+        switch (valueType)
+        {
+            case 1:
+                ComDispatch.Call(parameter, "SetBoolValue", value);
+                break;
+            case 2:
+                ComDispatch.Call(parameter, "SetIntValue", value);
+                break;
+            case 3:
+                ComDispatch.Call(parameter, "SetDoubleValue", value);
+                break;
+            case 4:
+                ComDispatch.Call(parameter, "SetStringValue", value);
+                break;
+            default:
+                throw new NotSupportedException($"Renga parameter ValueType {valueType} is not supported for writing.");
+        }
+    }
+
+    private static void TryRollback(object operation)
+    {
+        try
+        {
+            ComDispatch.Call(operation, "Rollback");
+        }
+        catch (COMException)
+        {
+            // Preserve the original exception; Renga may already have aborted the operation.
+        }
+    }
+
+    private static object CreateEditOperation(object project, object model, out bool undoRecorded)
+    {
+        object? modelId;
+        try
+        {
+            modelId = ComDispatch.Get(model, "Id");
+        }
+        catch (Exception exception) when (exception is COMException or TargetInvocationException or ArgumentException or InvalidCastException)
+        {
+            undoRecorded = false;
+            return RequireComObject(ComDispatch.Call(project, "CreateOperation"), "edit operation");
+        }
+
+        if (modelId is null)
+        {
+            undoRecorded = false;
+            return RequireComObject(ComDispatch.Call(project, "CreateOperation"), "edit operation");
+        }
+
+        try
+        {
+            var operation = ComDispatch.Call(project, "CreateOperationWithUndo", modelId);
+            undoRecorded = true;
+            return RequireComObject(operation, "undoable operation");
+        }
+        catch (Exception exception) when (exception is COMException or TargetInvocationException or ArgumentException or InvalidCastException)
+        {
+            undoRecorded = false;
+            return RequireComObject(ComDispatch.Call(project, "CreateOperation"), "edit operation");
+        }
     }
 
     private static RengaObjectSummary ReadObjectSummary(object modelObject) =>

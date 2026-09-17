@@ -107,6 +107,61 @@ public sealed class MockRengaAdapter : IRengaAdapter
         return Task.FromResult(new RengaObjectDetails(modelObject, parameters, properties, false, false));
     }
 
+    public Task<StylePage> ListStylesAsync(
+        string collection,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default)
+    {
+        RequireConnection();
+        IReadOnlyList<StyleSummary> styles =
+        [
+            new(101, "{44444444-4444-4444-4444-444444444444}", "Mock style")
+        ];
+        return Task.FromResult(new StylePage(collection, styles.Count, offset, limit, false, styles));
+    }
+
+    public Task<CreateObjectResult> CreateObjectAsync(
+        CreateObjectRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        RequireConnection();
+        if (!Guid.TryParse(request.TypeId, out var typeId))
+        {
+            throw new ArgumentException("type_id must be a GUID.", nameof(request));
+        }
+
+        var created = new RengaObjectSummary(
+            99,
+            "{99999999-9999-9999-9999-999999999999}",
+            typeId.ToString("B").ToUpperInvariant(),
+            "Mock created object",
+            false);
+        return Task.FromResult(new CreateObjectResult(
+            !request.Preview,
+            !request.Preview,
+            request.Preview ? "Preview succeeded; the operation was rolled back." : "Object created in an undoable mock operation.",
+            created));
+    }
+
+    public Task<ParameterUpdateResult> SetParameterAsync(
+        string objectUniqueId,
+        string parameterId,
+        string value,
+        bool preview,
+        CancellationToken cancellationToken = default)
+    {
+        RequireConnection();
+        return Task.FromResult(new ParameterUpdateResult(
+            !preview,
+            !preview,
+            objectUniqueId,
+            parameterId,
+            4,
+            "old",
+            value));
+    }
+
     private void RequireConnection()
     {
         if (!_connected)

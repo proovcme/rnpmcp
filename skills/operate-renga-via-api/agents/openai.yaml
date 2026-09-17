@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renga API Operator"
+  short_description: "Safely inspect and modify Renga models"
+  default_prompt: "Use $operate-renga-via-api to inspect or modify the open Renga model safely."

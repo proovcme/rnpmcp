@@ -36,6 +36,15 @@ internal static class ComDispatch
         }
     }
 
+    public static void Set(object target, string propertyName, object? value) =>
+        target.GetType().InvokeMember(
+            propertyName,
+            InstancePublic | BindingFlags.SetProperty,
+            binder: null,
+            target,
+            [value],
+            CultureInfo.InvariantCulture);
+
     public static object? Call(object target, string methodName, params object?[] arguments) =>
         target.GetType().InvokeMember(
             methodName,

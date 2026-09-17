@@ -29,8 +29,10 @@ builder.Services
     {
         options.ServerInfo = new() { Name = "renga-mcp", Version = "0.1.0" };
         options.ServerInstructions =
-            "Read-only access to a running Renga BIM instance. Connect before reading a project. " +
-            "Never infer regulatory compliance from model data alone. Results may be paginated or truncated.";
+            "Access a running Renga BIM instance. Connect before reading or writing a project. " +
+            "Write tools preview and roll back by default; explicit preview=false is required to commit. " +
+            "Never infer regulatory compliance or design quality from successful API calls alone. " +
+            "Results may be paginated or truncated.";
     })
     .WithStdioServerTransport()
     .WithTools<RengaTools>();

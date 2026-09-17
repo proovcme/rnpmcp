@@ -75,3 +75,44 @@ public sealed record RengaObjectDetails(
     IReadOnlyList<PropertyValue>? Properties,
     bool ParametersTruncated,
     bool PropertiesTruncated);
+
+public sealed record CreationType(
+    string Name,
+    string TypeId,
+    bool RequiresHost,
+    string HostHint);
+
+public sealed record StyleSummary(
+    int LocalId,
+    string UniqueId,
+    string Name);
+
+public sealed record StylePage(
+    string Collection,
+    int Total,
+    int Offset,
+    int Limit,
+    bool HasMore,
+    IReadOnlyList<StyleSummary> Items);
+
+public sealed record CreateObjectRequest(
+    string TypeId,
+    int? HostObjectId,
+    int? StyleId,
+    int? CategoryId,
+    bool Preview);
+
+public sealed record CreateObjectResult(
+    bool Committed,
+    bool UndoRecorded,
+    string Message,
+    RengaObjectSummary ModelObject);
+
+public sealed record ParameterUpdateResult(
+    bool Committed,
+    bool UndoRecorded,
+    string ObjectUniqueId,
+    string ParameterId,
+    int ValueType,
+    object? PreviousValue,
+    object? NewValue);

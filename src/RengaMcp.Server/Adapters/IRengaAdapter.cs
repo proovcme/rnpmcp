@@ -27,4 +27,21 @@ public interface IRengaAdapter : IDisposable
         bool includeProperties,
         int maxValues,
         CancellationToken cancellationToken = default);
+
+    Task<StylePage> ListStylesAsync(
+        string collection,
+        int offset,
+        int limit,
+        CancellationToken cancellationToken = default);
+
+    Task<CreateObjectResult> CreateObjectAsync(
+        CreateObjectRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<ParameterUpdateResult> SetParameterAsync(
+        string objectUniqueId,
+        string parameterId,
+        string value,
+        bool preview,
+        CancellationToken cancellationToken = default);
 }
