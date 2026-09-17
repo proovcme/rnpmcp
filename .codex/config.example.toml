@@ -1,0 +1,7 @@
+[mcp_servers.renga]
+command = "dotnet"
+args = ["C:\\absolute\\path\\to\\renga-mcp\\src\\RengaMcp.Server\\bin\\Release\\net8.0-windows\\RengaMcp.Server.dll"]
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+default_tools_approval_mode = "approve"
+enabled = true
