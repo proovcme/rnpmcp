@@ -22,6 +22,8 @@ For hosted doors and windows, the creation placement X-axis controls which side 
 
 For each door, verify sill/floor level, clear opening, swing/handing where represented, and collisions. For windows, verify sill/head elevations, spacing from corners, alignment, and separation from the roof or floor.
 
+For every window, build a keep-out zone from its exported aperture bounds and extend it into the room far enough for opening, cleaning, and access. Check that furniture, fixtures, riser enclosures, ceilings, roof edges, and newly segmented walls do not overlap either the aperture or this access zone. The intended overlap between a hosted window and its host wall is not a collision; any other object crossing the window's width-and-height projection is.
+
 If a host was created in the same operation and Renga reports an invalid `HostObjectId`, apply the host operation first, re-query its ID, then create hosted objects in a second undoable operation.
 
 ## Floors, ceilings, and roofs
@@ -65,6 +67,7 @@ Place sanitary fixtures as a coordinated wet core. A WC should back onto an inte
 - Every hosted object's host ID and actual visible placement.
 - Continuous wall loop and clean corners.
 - Openings do not extend below the level or into the roof.
+- Window apertures and their interior access zones remain clear of furniture, fixtures, shafts, and other walls.
 - Roof is closed, symmetrical where intended, and has the requested number of slopes.
 - Furniture and fixture world bounds do not penetrate walls or each other unintentionally.
 - Door swing zones and primary routes remain usable with furniture in operating positions.
