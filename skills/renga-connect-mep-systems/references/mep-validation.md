@@ -19,6 +19,7 @@ Run these checks after Renga generates a route and again after any architectural
 ## Discipline checks
 
 - Gravity drainage: verify actual slope, invert continuity, connection elevation, cleanouts, and feasible discharge. Do not assume hidden depth below a modeled floor.
+- For connector-generated Renga routes, do not trust the writable flag or the numeric value of `MepRouteSlope` alone. On Renga 9.3 / API 2.50, `IParameter.SetDoubleValue` can leave the route contour unchanged. Read `IRouteParams.GetContour()` and calculate `DeltaZ / horizontal length` for every horizontal segment; if it remains flat, report that the slope still requires route editing in Renga.
 - Water and hydronic pipework: verify design flow, diameter, pressure, insulation, valves, drainage, and access using the applicable discipline design workflow.
 - Ventilation: verify calculated airflow, velocity, pressure loss, fitting space, fire/smoke requirements, insulation, and service access.
 - Electrical: verify circuit intent, containment capacity, separation, bend constraints, fire stopping, and access. A geometric route is not a calculated circuit.

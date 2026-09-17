@@ -8,6 +8,7 @@
 - Set internal partition height to the ceiling underside or intended construction interface.
 - Equal wall-top and roof-level numbers prove contact only at the eaves. Check the complete roof underside and gable closure.
 - The standard wall height is uniform and `IWallContour` is inspection-only. A stepped gable approximation is schematic; keep its error inside the roof build-up and label it honestly.
+- Do not approximate a gable with dozens of narrow walls of increasing height. In Renga, create one continuous end wall high enough to intersect the roof and let the roof cut the wall to its underside; verify the resulting section and preserve any hosted dependants before replacement.
 
 ## Openings
 
