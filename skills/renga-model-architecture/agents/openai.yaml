@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renga Architecture Modeler"
+  short_description: "Build and validate architecture in Renga"
+  default_prompt: "Use $renga-model-architecture to create or correct architectural geometry in the open Renga model."

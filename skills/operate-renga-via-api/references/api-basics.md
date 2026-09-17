@@ -1,4 +1,4 @@
-# Renga API basics
+# Renga API connection and operation basics
 
 This is a concise working guide distilled from the official Renga API documentation and SDK samples. Verify version-sensitive behavior against the documentation shipped with the installed SDK.
 
@@ -6,19 +6,23 @@ Official starting points:
 
 - https://help.rengabim.com/api/overview-api-sdk-plugin.html
 - https://help.rengabim.com/api/overview-general-principles.html
-- https://help.rengabim.com/api/how-to-create-and-delete-object.html
-- https://help.rengabim.com/api/interface_i_new_entity_args.html
+- https://help.rengabim.com/api/how-to-local-server.html
+- https://help.rengabim.com/api/how-to-rot.html
+- https://help.rengabim.com/api/how-to-dt-language.html
 - https://help.rengabim.com/api/interface_i_project.html
+- https://help.rengabim.com/api/interface_i_operation.html
 
 ## External controller
 
-Renga exposes a COM API. An external helper should be x64, run in an STA thread, and attach to a running Renga instance through the Running Object Table. Renga monikers have the form `!Renga Application, ver: <version>, pid: <pid>`.
+Renga exposes a COM API. An external helper should be x64, initialize COM as STA, keep COM access on that thread, and attach to the intended running instance through the Running Object Table. Human-readable monikers have the form `!Renga Application, ver: <version>, pid: <pid>`; a CLSID moniker can also exist.
 
-Use the official type library or generated `Interop.Renga.dll` when possible. Typed interop handles GUIDs, structs, and SAFEARRAYs more reliably than late-bound `dynamic` dispatch. Keep all COM access on the same STA thread.
+`Marshal.GetActiveObject("Renga.Application.1")` returns the first registered instance and is unsuitable when more than one Renga process is open. Creating `new Renga.Application()` uses Renga as a local COM server and may launch a new invisible process; set `Visible` explicitly and own its close/quit lifecycle only when the task asks for a new instance.
+
+Use the official type library or a locally generated interop assembly when available, but never publish Renga SDK files or generated Interop binaries in a public skill or repository. Typed interop handles GUIDs, structs, SAFEARRAYs, and casts more reliably than late-bound dispatch. For dynamic access, prefer API members whose names end in `S` for string GUIDs and `GetInterfaceByName()` for additional interfaces.
 
 ## Models and objects
 
-- `IApplication.Project` gives the active project.
+- `IApplication.Project` gives the active project only when a project is open.
 - `IProject.Model` is the building model. Assemblies and drawings have their own models and undo stacks.
 - `IModel.GetObjects()` returns model objects; inspect `ObjectType`, `Id`, and `UniqueId`.
 - Query optional behavior with `IModelObject.GetInterfaceByName`, such as `IBaseline2DObject`, `ILevelObject`, or `IRoofSlopes`. A type GUID alone does not guarantee that an assumed interface or parameter is available in every version.
@@ -28,11 +32,10 @@ Use the official type library or generated `Interop.Renga.dll` when possible. Ty
 The official pattern is:
 
 ```csharp
-var op = project.CreateOperationWithUndo(model.Id);
-op.Start();
+var op = project.StartOperationWithUndo(model.Id);
 try
 {
-    // create, edit, or delete model objects
+    // edit model objects
     op.Apply();
 }
 catch
@@ -42,29 +45,19 @@ catch
 }
 ```
 
-Use `CreateOperation()` only when an undoable operation is unavailable and disclose that limitation. Undo stacks belong to individual models. Changes to project-level entities such as styles and materials are not covered by model undo.
+`StartOperation*` creates and starts an operation. `CreateOperation*` requires an explicit `Start()`. Check `HasActiveOperation()` first because operations cannot be nested. Undo stacks belong to individual models. Changes to project-level entities such as styles and materials are not covered by model undo; use a regular operation and disclose the recovery limitation.
+
+Late-bound clients may fail to marshal `IModel.Id` as a GUID in some installed API builds. Do not invent a model ID. Fall back to a regular operation only when an undoable operation is genuinely unavailable, and return that fact to the user.
 
 `DeleteObjectById` may also remove dependent objects. Resolve and report the exact target set before deletion.
 
-## Creation contract
+## State and error handling
 
-Create arguments with `model.CreateNewEntityArgs()` and set only fields that apply:
+- Check every integer result code; zero commonly means success, but verify the called method's documentation.
+- When object creation returns null or a cast fails, capture `IApplication.LastError` before issuing unrelated calls.
+- Re-query the project and model after apply rather than trusting cached wrappers.
+- Release COM wrappers deterministically in long-running helpers, without releasing objects still owned by another live wrapper.
+- Detect API capabilities by version and interface availability. Consult the official changelog for version-sensitive code rather than assuming the newest interfaces exist.
+- Never interpret `HasUnsavedChanges` as authorization to save.
 
-- `TypeId`: required entity type GUID.
-- `HostObjectId`: level for level-based objects; wall or another allowed host for dependent objects such as doors and windows.
-- `StyleId`: optional for many types, mandatory for some equipment types. Choose from the matching project style collection.
-- `Placement3D`: origin and orthonormal axes for level-based 3D objects.
-- `Placement2D`: drawing objects.
-- `FilePath`: linked files and images; use an absolute path.
-
-`model.CreateObject(args)` can return null. Check it immediately and include `application.LastError` in diagnostics.
-
-After creation, obtain the object's specialized interface and set geometry before applying the operation. Some Renga versions do not accept a newly created object as another object's host until the host operation has been applied; if observed, commit the hosts first and create dependants in a second undoable operation.
-
-## Validation
-
-After apply, re-query the model instead of trusting cached COM objects. Check object count/type, host IDs, placement, specialized geometry, and any modified parameters. Then inspect the visible plan/3D result. Do not save automatically.
-
-Requested placement is not necessarily final placement. Renga may project or normalize a dependent object's `Placement3D`; read `ILevelObject.GetPlacement()`, `PlacementElevation`, `VerticalOffset`, and `ElevationAboveLevel` after creation. Validate the resulting geometry, not the input origin.
-
-For exact extents, use `IProject.DataExporter.GetObjects3D()`. Match `IExportedObject3D.ModelObjectId` to the model object, traverse meshes and grids, and calculate world-coordinate bounds from grid vertices. This is the preferred broad-phase check for objects whose style geometry is not known in advance.
+Saving, Save As, closing, quitting, IFC/DWG/PDF export, collaboration publish, and synchronization are separate external effects. Perform them only when explicitly requested, use an explicit destination or target, and return the API result.

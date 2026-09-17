@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renga Model Data Inspector"
+  short_description: "Extract typed model data and geometry"
+  default_prompt: "Use $renga-inspect-model-data to inspect objects, values, or geometry in the open Renga project."
