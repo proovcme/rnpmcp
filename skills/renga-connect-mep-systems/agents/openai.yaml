@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renga MEP Connector"
+  short_description: "Create and validate Renga MEP connections"
+  default_prompt: "Use $renga-connect-mep-systems to create or diagnose coordinated MEP connections in the open Renga model."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Renga API Plugin Developer"
+  short_description: "Build and troubleshoot in-process Renga plugins"
+  default_prompt: "Use $renga-develop-api-plugin to design or implement an in-process Renga API plugin safely."

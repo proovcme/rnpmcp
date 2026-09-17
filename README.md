@@ -181,7 +181,9 @@ dotnet test .\tests\RengaMcp.Tests\RengaMcp.Tests.csproj -c Release
 
 - [`operate-renga-via-api`](skills/operate-renga-via-api) — подключение через COM/ROT, выбор процесса, жизненный цикл проекта, транзакции, undo и диагностика API;
 - [`renga-model-architecture`](skills/renga-model-architecture) — создание и проверка уровней, стен, перекрытий, кровель, помещений, проёмов, мебели и сантехники;
-- [`renga-inspect-model-data`](skills/renga-inspect-model-data) — параметры, количества, свойства, материалы, армирование, экспорт геометрии и пространственный аудит.
+- [`renga-inspect-model-data`](skills/renga-inspect-model-data) — параметры, количества, свойства, материалы, армирование, экспорт геометрии и пространственный аудит;
+- [`renga-develop-api-plugin`](skills/renga-develop-api-plugin) — разработка загружаемых в процесс Renga плагинов, `.rndesc`, UI-команды, события, установка и диагностика загрузки;
+- [`renga-connect-mep-systems`](skills/renga-connect-mep-systems) — создание и проверка соединений труб, воздуховодов и электрических цепей через инженерный коннектор Renga.
 
 Архитектурный навык требует, чтобы:
 
